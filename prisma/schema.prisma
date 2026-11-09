@@ -7,4 +7,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Attendance models will be added with the first business use case.
+enum AttendanceDirection {
+  ENTRY
+  EXIT
+}
+
+enum Factory {
+  BINH_DUONG
+  LONG_AN
+}
+
+model AttendanceRecord {
+  id          String              @id @default(uuid()) @db.Uuid
+  eventId     String              @unique @map("event_id") @db.VarChar(128)
+  employeeId  String              @map("employee_id") @db.VarChar(128)
+  factory     Factory
+  gateId      String              @map("gate_id") @db.VarChar(128)
+  direction   AttendanceDirection
+  occurredAt  DateTime            @map("occurred_at") @db.Timestamptz(3)
+  recordedAt  DateTime            @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  @@index([employeeId, occurredAt(sort: Desc)])
+  @@map("attendance_records")
+}
