@@ -8,6 +8,7 @@ import type {
 
 const event: QualifiedAttendanceEvent = {
   eventId: 'edge-001',
+  passageEvidenceId: 'passage-001',
   employeeId: 'employee-17',
   factory: 'BINH_DUONG',
   gateId: 'gate-2',
@@ -27,6 +28,13 @@ function adapter(
 ) {
   const prisma = {
     attendanceRecord: { create, findUnique, findMany },
+    auditOutbox: { create: vi.fn().mockResolvedValue({}) },
+    attendancePeriod: {
+      upsert: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    $transaction: async (operation: (tx: unknown) => Promise<unknown>) =>
+      operation(prisma),
   } as unknown as PrismaClient;
   return new PrismaAttendanceRepository(prisma);
 }
@@ -35,7 +43,9 @@ describe('Prisma attendance adapter', () => {
   it('inserts a new event directly', async () => {
     const create = vi.fn().mockResolvedValue(record);
     const repository = adapter(create);
-    await expect(repository.insertOrGet(event)).resolves.toEqual({
+    await expect(
+      repository.insertOrGet(event, 'factory-gateway'),
+    ).resolves.toEqual({
       record,
       created: true,
     });
@@ -52,7 +62,9 @@ describe('Prisma attendance adapter', () => {
     );
     const findUnique = vi.fn().mockResolvedValue(record);
     const repository = adapter(vi.fn().mockRejectedValue(conflict), findUnique);
-    await expect(repository.insertOrGet(event)).resolves.toEqual({
+    await expect(
+      repository.insertOrGet(event, 'factory-gateway'),
+    ).resolves.toEqual({
       record,
       created: false,
     });
@@ -69,18 +81,14 @@ describe('Prisma attendance adapter', () => {
       vi.fn(),
       findMany,
     );
-    await expect(repository.insertOrGet(event)).rejects.toBe(failure);
-    await expect(
-      repository.list({ employeeId: event.employeeId, limit: 25, offset: 0 }),
-    ).resolves.toEqual([record]);
+    await expect(repository.insertOrGet(event, 'factory-gateway')).rejects.toBe(
+      failure,
+    );
+    await expect(repository.listAll(event.employeeId)).resolves.toEqual([
+      record,
+    ]);
     expect(findMany).toHaveBeenCalledWith({
-      where: {
-        employeeId: event.employeeId,
-        occurredAt: { gte: undefined, lte: undefined },
-      },
-      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-      take: 25,
-      skip: 0,
+      where: { employeeId: event.employeeId },
     });
   });
 });

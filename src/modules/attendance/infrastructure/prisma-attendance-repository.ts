@@ -1,7 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { AttendanceRuleError } from '../application/errors';
+import { vietnamMonth } from '../domain/period';
 import type { AttendanceRepository } from '../application/attendance-repository';
 import type {
-  AttendanceHistoryFilter,
   AttendanceRecord,
   QualifiedAttendanceEvent,
 } from '../domain/attendance';
@@ -9,9 +10,34 @@ import type {
 export class PrismaAttendanceRepository implements AttendanceRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async insertOrGet(event: QualifiedAttendanceEvent) {
+  async insertOrGet(event: QualifiedAttendanceEvent, actorId: string) {
     try {
-      const record = await this.prisma.attendanceRecord.create({ data: event });
+      const record = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.attendanceRecord.create({ data: event });
+        const month = vietnamMonth(event.occurredAt);
+        await tx.attendancePeriod.upsert({
+          where: { factory_month: { factory: event.factory, month } },
+          create: { factory: event.factory, month },
+          update: {},
+        });
+        await tx.attendancePeriod.updateMany({
+          where: { factory: event.factory, month, status: 'FINALIZED' },
+          data: { status: 'REOPEN_REQUIRED' },
+        });
+        await tx.auditOutbox.create({
+          data: {
+            eventType: 'attendance.accepted',
+            aggregateId: created.id,
+            actorId,
+            payload: {
+              eventId: event.eventId,
+              employeeId: event.employeeId,
+              factory: event.factory,
+            },
+          },
+        });
+        return created;
+      });
       return { record, created: true };
     } catch (error) {
       if (
@@ -22,20 +48,19 @@ export class PrismaAttendanceRepository implements AttendanceRepository {
           where: { eventId: event.eventId },
         });
         if (record) return { record, created: false };
+        throw new AttendanceRuleError('Passage evidence already recorded', 409);
       }
       throw error;
     }
   }
 
-  async list(filter: AttendanceHistoryFilter): Promise<AttendanceRecord[]> {
-    return this.prisma.attendanceRecord.findMany({
-      where: {
-        employeeId: filter.employeeId,
-        occurredAt: { gte: filter.from, lte: filter.to },
-      },
-      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-      take: filter.limit,
-      skip: filter.offset,
-    });
+  async listForFactory(
+    factory: QualifiedAttendanceEvent['factory'],
+  ): Promise<AttendanceRecord[]> {
+    return this.prisma.attendanceRecord.findMany({ where: { factory } });
+  }
+
+  async listAll(employeeId: string): Promise<AttendanceRecord[]> {
+    return this.prisma.attendanceRecord.findMany({ where: { employeeId } });
   }
 }

@@ -1,13 +1,18 @@
 import type {
-  AttendanceHistoryFilter,
   AttendanceRecord,
   QualifiedAttendanceEvent,
 } from '../domain/attendance';
 
 export interface AttendanceRepository {
-  insertOrGet(event: QualifiedAttendanceEvent): Promise<{
+  insertOrGet(
+    event: QualifiedAttendanceEvent,
+    actorId: string,
+  ): Promise<{
     record: AttendanceRecord;
     created: boolean;
   }>;
-  list(filter: AttendanceHistoryFilter): Promise<AttendanceRecord[]>;
+  listAll(employeeId: string): Promise<AttendanceRecord[]>;
+  listForFactory(
+    factory: QualifiedAttendanceEvent['factory'],
+  ): Promise<AttendanceRecord[]>;
 }

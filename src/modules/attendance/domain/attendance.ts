@@ -3,6 +3,7 @@ export type AttendanceDirection = 'ENTRY' | 'EXIT';
 
 export interface QualifiedAttendanceEvent {
   eventId: string;
+  passageEvidenceId: string;
   employeeId: string;
   factory: Factory;
   gateId: string;
@@ -10,25 +11,22 @@ export interface QualifiedAttendanceEvent {
   occurredAt: Date;
 }
 
-export interface AttendanceRecord extends QualifiedAttendanceEvent {
+export interface AttendanceRecord extends Omit<
+  QualifiedAttendanceEvent,
+  'passageEvidenceId'
+> {
+  passageEvidenceId: string | null;
   id: string;
   recordedAt: Date;
 }
 
-export interface AttendanceHistoryFilter {
-  employeeId: string;
-  from?: Date;
-  to?: Date;
-  limit: number;
-  offset: number;
-}
-
 export function sameEvent(
-  a: QualifiedAttendanceEvent,
+  a: AttendanceRecord,
   b: QualifiedAttendanceEvent,
 ): boolean {
   return (
     a.eventId === b.eventId &&
+    a.passageEvidenceId === b.passageEvidenceId &&
     a.employeeId === b.employeeId &&
     a.factory === b.factory &&
     a.gateId === b.gateId &&

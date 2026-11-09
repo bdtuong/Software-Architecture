@@ -16,20 +16,22 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "dev:token": "tsx scripts/dev-token.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "express": "^5.1.0",
+    "jose": "^5.10.0",
     "swagger-ui-express": "^5.0.1",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/supertest": "^6.0.0",
     "@types/swagger-ui-express": "^4.1.0",
-    "@vitest/coverage-v8": "^3.0.0",
+    "@vitest/coverage-v8": "^5.1.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "prisma": "^6.19.0",
@@ -37,6 +39,6 @@
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^5.1.0"
   }
 }

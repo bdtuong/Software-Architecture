@@ -17,16 +17,84 @@ enum Factory {
   LONG_AN
 }
 
+enum CorrectionKind {
+  ADD
+  REPLACE
+  VOID
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model AttendanceRecord {
   id          String              @id @default(uuid()) @db.Uuid
   eventId     String              @unique @map("event_id") @db.VarChar(128)
+  passageEvidenceId String? @unique @map("passage_evidence_id") @db.VarChar(128)
   employeeId  String              @map("employee_id") @db.VarChar(128)
   factory     Factory
   gateId      String              @map("gate_id") @db.VarChar(128)
   direction   AttendanceDirection
   occurredAt  DateTime            @map("occurred_at") @db.Timestamptz(3)
   recordedAt  DateTime            @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  corrections AttendanceCorrection[]
 
   @@index([employeeId, occurredAt(sort: Desc)])
   @@map("attendance_records")
+}
+
+model AttendanceCorrection {
+  id             String           @id @default(uuid()) @db.Uuid
+  kind           CorrectionKind
+  status         CorrectionStatus @default(PENDING)
+  employeeId     String           @map("employee_id") @db.VarChar(128)
+  factory        Factory
+  targetRecordId String?          @map("target_record_id") @db.Uuid
+  targetRecord   AttendanceRecord? @relation(fields: [targetRecordId], references: [id])
+  direction      AttendanceDirection?
+  occurredAt     DateTime?        @map("occurred_at") @db.Timestamptz(3)
+  reason         String           @db.VarChar(1000)
+  requestedBy    String           @map("requested_by") @db.VarChar(128)
+  requestedAt    DateTime         @default(now()) @map("requested_at") @db.Timestamptz(3)
+  reviewedBy     String?          @map("reviewed_by") @db.VarChar(128)
+  reviewedAt     DateTime?        @map("reviewed_at") @db.Timestamptz(3)
+  reviewReason   String?          @map("review_reason") @db.VarChar(1000)
+
+  @@index([employeeId, status])
+  @@index([targetRecordId, status])
+  @@map("attendance_corrections")
+}
+
+model AuditOutbox {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  aggregateId String   @map("aggregate_id") @db.VarChar(128)
+  actorId     String   @map("actor_id") @db.VarChar(128)
+  payload     Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(3)
+
+  @@index([deliveredAt, createdAt])
+  @@map("audit_outbox")
+}
+
+enum PeriodStatus {
+  OPEN
+  FINALIZED
+  REOPEN_REQUIRED
+}
+
+model AttendancePeriod {
+  id          String       @id @default(uuid()) @db.Uuid
+  factory     Factory
+  month       String       @db.VarChar(7)
+  status      PeriodStatus @default(OPEN)
+  revision    Int          @default(0)
+  finalizedAt DateTime?    @map("finalized_at") @db.Timestamptz(3)
+  finalizedBy String?      @map("finalized_by") @db.VarChar(128)
+
+  @@unique([factory, month])
+  @@map("attendance_periods")
 }

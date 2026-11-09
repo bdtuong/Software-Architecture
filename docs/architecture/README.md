@@ -1,28 +1,38 @@
 # Architecture boundary
 
-The broader TMC-AACS design uses Pure Service-Based Architecture: eight logical components
-organized into six coarse-grained services. Factory Edge and Central Infrastructure are
-physical deployment locations, not a second architectural style. This repository implements
-only the Attendance Management module. It does not include QR issuance, authorization,
-turnstile integration, or the Factory Edge SQLite transactional outbox. An upstream Allow
-decision is not evidence of physical passage; already qualified events are the input here.
-
-## Attendance component view
+Group 11's M1 design uses Pure Service-Based Architecture: eight logical components in six
+coarse-grained services. Factory Edge and Central Infrastructure are deployment locations,
+not a second architecture style. This repository implements only Attendance Management,
+the central component of Attendance Service.
 
 ```text
-Qualified event source -> HTTP/Zod adapter -> AttendanceService -> AttendanceRepository
-                                                        |                  |
-                                                  idempotency check    Prisma adapter
-                                                                           |
-                                                                    Central PostgreSQL
+Factory Edge Gate Service
+  qualified passage + stable Event ID + evidence reference
+                |
+                v
+JWT scope -> HTTP/Zod -> Attendance use cases -> repository ports -> Prisma -> PostgreSQL
+                                |                                |
+                                +-- corrections and periods      +-- audit outbox
+                                                                       |
+                                                       Reporting and Audit Service
+
+Integration Service <- finalized revisioned attendance export
 ```
 
-The database has a unique index on `event_id`. The adapter attempts an insert and, on a
-unique violation, retrieves the existing record. The service compares all event fields before
-returning an idempotent duplicate response. This avoids a read-before-write race. Persistent
-errors propagate to an HTTP 503 response; the source must retain the stable Event ID and retry.
+The Gate Service owns QR scan coordination, turnstile integration, passage qualification,
+and factory-local SQLite outbox delivery. Identity and Access Service owns QR credentials,
+access decisions, and trusted identity issuance. Attendance Service owns central records,
+effective state, corrections, and period finalization. Reporting and Audit Service consumes
+audit messages and owns searchable logs. Integration Service owns HR/Payroll transmission
+and reconciliation. No other service is implemented here.
 
-This implementation does not secure the HTTP boundary itself. A trusted gateway or service
-identity mechanism is required before exposure to untrusted networks. System-wide RBAC,
-comprehensive audit logging, privacy controls, reporting, and payroll synchronization remain
-future architecture work.
+A central event insert, period invalidation, and audit outbox write use one PostgreSQL
+transaction. The unique Event ID prevents duplicate effects under concurrent retry. An
+identical retry returns the original record, while conflicting content returns 409. A
+separate partial unique index prevents two approved corrections from replacing or voiding
+the same raw record. The audit outbox poll/ack API supports at-least-once transfer; the
+consumer must deduplicate by message ID.
+
+For the local assignment runtime, one PostgreSQL container is used. The M1 production
+allocation calls for protected central commits with a synchronous standby, backups, and
+health-aware routing. Those deployment properties are not provided by Docker Compose.

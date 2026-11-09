@@ -1,15 +1,17 @@
 # Attendance Management
 
-The attendance service accepts **already qualified physical passage events**. A gate-open
-authorization alone is not proof of passage. Qualification and authentication of upstream
-sources must be enforced by the surrounding system before events reach this module.
+This module owns authoritative attendance records, effective state, corrections, monthly
+finalization, and its audit outbox in central PostgreSQL. It accepts **already qualified
+physical passage events** from authenticated, factory-scoped Gateways. An Allow decision or
+accepted gate command alone does not prove passage. The Gate Service must supply a stable
+Event ID and unique passage-evidence reference; controller-specific verification stays at
+the Factory Edge.
 
-- `domain/`: event and record types plus payload equality for idempotency.
-- `application/`: a focused repository port and use case service.
-- `infrastructure/`: Prisma adapter for authoritative central PostgreSQL.
-- `presentation/`: Zod-validated HTTP routes and JSON responses.
+- `domain/`: event, correction, and period concepts plus pure interpretation rules.
+- `application/`: use cases and focused repository ports.
+- `infrastructure/`: Prisma adapters and central transaction boundaries.
+- `presentation/`: Zod validation, JWT authorization, and HTTP routes.
 
-`eventId` is unique in PostgreSQL. Repeating the same ID and payload returns the original
-record; reusing an ID with different content returns 409. Database errors return 503, allowing
-upstream retry with the same stable ID. No local outbox, QR logic, turnstile integration,
-payroll export, or automated retry queue is implemented here.
+Raw events remain immutable. Approved corrections affect only the effective view. The local
+SQLite outbox, QR authorization, turnstile API, reporting, and HR/Payroll transfer belong to
+other M1 services. See `docs/decisions/attendance-rules.md` for the selected M2 business rules.
