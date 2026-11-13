@@ -30,6 +30,7 @@ Node.js 22/24 LTS, TypeScript strict mode, Express 5, PostgreSQL 16, Prisma 6, Z
 - `src/config/`: environment and JWT verification.
 - `prisma/migrations/`: authoritative schema changes and unique constraints.
 - `tests/integration/`: HTTP tests plus an optional isolated PostgreSQL integration test.
+- `tests/solid/`: focused executable examples for SRP, OCP, LSP, ISP, and DIP.
 - `docs/architecture/`, `docs/decisions/`: M1 boundary and M2 decisions.
 
 The attendance use cases separate event ingestion, correction requests, correction review, correction listing, effective history, and period management (SRP). Each use case depends on the repository operations it needs (ISP/DIP); `PeriodService` reads effective factory data through a port. Correction request validation is selected by correction kind through an injectable rule map (OCP). The in-memory and Prisma event writers run the same behavioral contract test (LSP). Construction uses simple composition in `src/server.ts`. See [SOLID design notes](docs/architecture/solid.md) for the boundaries and remaining tradeoffs.

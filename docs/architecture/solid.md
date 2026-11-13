@@ -11,3 +11,11 @@ The service keeps HTTP and JWT handling in presentation/config, business rules i
 | Dependency Inversion  | Application services depend on repository and `EffectiveFactoryReader` ports. Domain access policy depends on the domain `Principal` type rather than JWT configuration.                                                                 | Prisma and JWT wiring stays at the composition boundary; tests inject in-memory implementations.                                                                                                                                                                                                |
 
 The shared contract covers the event writer's observable behavior. It does not prove that every in-memory query and transaction matches PostgreSQL under concurrency; the live PostgreSQL integration test covers critical review, period, and audit flows.
+
+## Test review
+
+`tests/solid/` contains one focused file per principle. SRP tests construct request and review workflows independently; OCP injects an additional correction rule; LSP runs the shared writer contract against the in-memory adapter; ISP supplies minimal writer and reader ports; DIP exports through an injected effective-data reader. The same LSP writer contract runs against Prisma in `tests/integration/postgres.test.ts` when `TEST_DATABASE_URL` is set.
+
+The existing `tests/unit/` files check attendance, correction, period, authentication, and Prisma behavior. `tests/integration/attendance.test.ts` checks HTTP workflows and access control. These are functional tests: passing them supports correctness but does not, by itself, prove a SOLID principle. The SOLID files demonstrate replaceability and separation at specific boundaries; they cannot prove that every future change will preserve the design.
+
+The current design is strongest on ISP and DIP at application boundaries. SRP is improved by separating correction workflows, although `PeriodService` still owns both finalization and export. OCP is limited to request validation rules; a new correction kind requires coordinated API, domain, persistence, and effective-view changes. LSP evidence covers the event-writer contract and selected PostgreSQL flows, not all repository ports or concurrent interleavings.
