@@ -25,7 +25,99 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
-  it('commits events and audit atomically, applies corrections, and reopens finalized periods for late data', async () => {
+  it('TC19 commits the event, month, and audit message together', async () => {
+    const db = prisma!;
+    const suffix = randomUUID();
+    const eventId = `atomic-${suffix}`;
+    const employeeId = `atomic-employee-${suffix}`;
+    const event = {
+      eventId,
+      passageEvidenceId: `atomic-evidence-${suffix}`,
+      employeeId,
+      factory: 'LONG_AN' as const,
+      gateId: 'G1',
+      direction: 'ENTRY' as const,
+      occurredAt: new Date('2018-08-15T00:00:00Z'),
+    };
+    const priorPeriod = await db.attendancePeriod.findUnique({
+      where: { factory_month: { factory: 'LONG_AN', month: '2018-08' } },
+    });
+    let recordId: string | undefined;
+    try {
+      const result = await new PrismaAttendanceRepository(db).insertOrGet(
+        event,
+        `gateway-${suffix}`,
+      );
+      recordId = result.record.id;
+      expect(result.created).toBe(true);
+      expect(await db.attendanceRecord.count({ where: { eventId } })).toBe(1);
+      expect(
+        await db.attendancePeriod.findUnique({
+          where: { factory_month: { factory: 'LONG_AN', month: '2018-08' } },
+        }),
+      ).not.toBeNull();
+      expect(
+        await db.auditOutbox.count({
+          where: { eventType: 'attendance.accepted', aggregateId: recordId },
+        }),
+      ).toBe(1);
+    } finally {
+      if (recordId)
+        await db.auditOutbox.deleteMany({ where: { aggregateId: recordId } });
+      await db.attendanceRecord.deleteMany({ where: { eventId } });
+      if (!priorPeriod) {
+        await db.attendancePeriod.deleteMany({
+          where: { factory: 'LONG_AN', month: '2018-08' },
+        });
+      }
+    }
+  });
+
+  it('TC21 reopens a finalized month after a late event', async () => {
+    const db = prisma!;
+    const suffix = randomUUID();
+    const eventId = `late-${suffix}`;
+    const period = await db.attendancePeriod.create({
+      data: {
+        factory: 'LONG_AN',
+        month: '2018-07',
+        status: 'FINALIZED',
+        revision: 1,
+        finalizedBy: `hr-${suffix}`,
+        finalizedAt: new Date(),
+      },
+    });
+    let recordId: string | undefined;
+    try {
+      const result = await new PrismaAttendanceRepository(db).insertOrGet(
+        {
+          eventId,
+          passageEvidenceId: `late-evidence-${suffix}`,
+          employeeId: `late-employee-${suffix}`,
+          factory: 'LONG_AN',
+          gateId: 'G1',
+          direction: 'ENTRY',
+          occurredAt: new Date('2018-07-15T00:00:00Z'),
+        },
+        `gateway-${suffix}`,
+      );
+      recordId = result.record.id;
+      expect(
+        (
+          await db.attendancePeriod.findUniqueOrThrow({
+            where: { id: period.id },
+          })
+        ).status,
+      ).toBe('REOPEN_REQUIRED');
+    } finally {
+      if (recordId)
+        await db.auditOutbox.deleteMany({ where: { aggregateId: recordId } });
+      await db.attendanceRecord.deleteMany({ where: { eventId } });
+      await db.attendancePeriod.delete({ where: { id: period.id } });
+    }
+  });
+
+  it('TC27 commits events and audit atomically, applies corrections, and reopens finalized periods for late data', async () => {
     const db = prisma!;
     const attendanceRepo = new PrismaAttendanceRepository(db);
     const correctionRepo = new PrismaCorrectionRepository(db);
@@ -86,6 +178,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect(
         await db.auditOutbox.count({ where: { aggregateId: first.record.id } }),
       ).toBe(1);
+      expect(await periodRepo.get('BINH_DUONG', '2026-10')).not.toBeNull();
 
       await expect(
         attendance.accept({ ...event, eventId: `conflict-${suffix}` }, gateway),
@@ -93,6 +186,15 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect(await db.attendanceRecord.count({ where: { employeeId } })).toBe(
         1,
       );
+      expect(
+        await db.auditOutbox.count({
+          where: {
+            eventType: 'attendance.accepted',
+            aggregateId: first.record.id,
+            actorId: 'contract-gateway',
+          },
+        }),
+      ).toBe(1);
       const auditMessage = (await audit.pending(100)).find(
         (message) => message.aggregateId === first.record.id,
       );
@@ -230,5 +332,40 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
         where: { factory: 'BINH_DUONG', month: '2026-10', finalizedBy: hr.sub },
       });
     }
+  });
+
+  it('TC20 rolls back the event and month when audit insertion fails', async () => {
+    const db = prisma!;
+    const suffix = randomUUID();
+    const eventId = `rollback-${suffix}`;
+    const evidenceId = `rollback-evidence-${suffix}`;
+    const employeeId = `rollback-employee-${suffix}`;
+    const event = {
+      eventId,
+      passageEvidenceId: evidenceId,
+      employeeId,
+      factory: 'LONG_AN' as const,
+      gateId: 'G1',
+      direction: 'ENTRY' as const,
+      occurredAt: new Date('2025-04-15T00:00:00Z'),
+    };
+    const priorPeriod = await db.attendancePeriod.findUnique({
+      where: { factory_month: { factory: 'LONG_AN', month: '2025-04' } },
+    });
+    // actor_id is VARCHAR(128); this fails only at the last transaction write.
+    await expect(
+      new PrismaAttendanceRepository(db).insertOrGet(event, 'x'.repeat(129)),
+    ).rejects.toThrow();
+    expect(await db.attendanceRecord.count({ where: { eventId } })).toBe(0);
+    expect(
+      await db.attendancePeriod.findUnique({
+        where: { factory_month: { factory: 'LONG_AN', month: '2025-04' } },
+      }),
+    ).toEqual(priorPeriod);
+    expect(
+      await db.auditOutbox.count({
+        where: { payload: { path: ['eventId'], equals: eventId } },
+      }),
+    ).toBe(0);
   });
 });

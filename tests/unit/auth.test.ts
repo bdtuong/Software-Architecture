@@ -21,7 +21,7 @@ async function token(overrides: Record<string, unknown> = {}) {
 }
 
 describe('service token verifier', () => {
-  it('accepts a signed, scoped token', async () => {
+  it('TC31 accepts a signed, scoped token', async () => {
     await expect(
       createTokenVerifier(secret)(await token()),
     ).resolves.toMatchObject({
@@ -30,7 +30,7 @@ describe('service token verifier', () => {
       factories: ['BINH_DUONG'],
     });
   });
-  it('rejects tampering and unknown roles', async () => {
+  it('TC32 rejects tampering and unknown roles', async () => {
     const signed = await token();
     await expect(createTokenVerifier(secret)(signed + 'x')).rejects.toThrow();
     await expect(

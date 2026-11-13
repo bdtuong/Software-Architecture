@@ -21,6 +21,12 @@ const principals: Record<string, Principal> = {
     factories: ['BINH_DUONG'],
     employeeIds: [],
   },
+  gatewayLa: {
+    sub: 'gateway-la',
+    role: 'GATEWAY',
+    factories: ['LONG_AN'],
+    employeeIds: [],
+  },
   employee: {
     sub: 'employee-17',
     role: 'EMPLOYEE',
@@ -110,56 +116,16 @@ const setup = () => {
 };
 
 describe('attendance HTTP API', () => {
-  it('requires a verified factory-scoped gateway token', async () => {
-    const { app } = setup();
-    expect(
-      (await request(app).post('/api/attendance/events').send(event)).status,
-    ).toBe(401);
-    expect((await sendEvent(app, event, 'employee')).status).toBe(403);
-    expect(
-      (await sendEvent(app, { ...event, factory: 'LONG_AN' })).status,
-    ).toBe(403);
-  });
-
-  it('creates once, recognizes retries, and rejects conflicting reuse', async () => {
-    const { app } = setup();
-    const first = await sendEvent(app);
-    const retry = await sendEvent(app);
-    const conflict = await sendEvent(app, { ...event, direction: 'EXIT' });
-    expect(first.status).toBe(201);
-    expect(retry.status).toBe(200);
-    expect(retry.body.record.id).toBe(first.body.record.id);
-    expect(conflict.status).toBe(409);
-    expect(
-      (await sendEvent(app, { ...event, occurredAt: 'yesterday' })).status,
-    ).toBe(400);
-  });
-
-  it('limits history to permitted users and derives current state by event time', async () => {
+  it('TC22 limits history to permitted users', async () => {
     const { app } = setup();
     await sendEvent(app);
-    await sendEvent(app, {
-      ...event,
-      eventId: 'edge-002',
-      passageEvidenceId: 'passage-002',
-      direction: 'EXIT',
-      occurredAt: '2026-11-09T17:00:00+07:00',
-    });
-    const history = await getHistory(app);
-    expect(
-      history.body.records.map((r: { eventId: string }) => r.eventId),
-    ).toEqual(['edge-002', 'edge-001']);
+    expect((await getHistory(app)).status).toBe(200);
     expect((await getHistory(app, 'other')).status).toBe(403);
     expect((await getHistory(app, 'supervisor')).status).toBe(200);
     expect((await getHistory(app, 'admin')).status).toBe(403);
-    const state = await request(app)
-      .get('/api/attendance/state')
-      .set('Authorization', 'Bearer employee')
-      .query({ employeeId: 'employee-17' });
-    expect(state.body.state).toBe('OUT');
   });
 
-  it('applies an HR-approved replacement without changing the raw event', async () => {
+  it('TC23 applies an HR-approved replacement without changing the raw event', async () => {
     const { app } = setup();
     const original = await sendEvent(app);
     const correction = await request(app)
@@ -201,7 +167,7 @@ describe('attendance HTTP API', () => {
     ).toBe(409);
   });
 
-  it('supports ADD and VOID corrections and flags repeated directions for review', async () => {
+  it('TC24 supports ADD and VOID corrections', async () => {
     const { app } = setup();
     const raw = await sendEvent(app);
     await sendEvent(app, {
@@ -210,11 +176,6 @@ describe('attendance HTTP API', () => {
       passageEvidenceId: 'passage-002',
       occurredAt: '2026-11-09T08:00:00+07:00',
     });
-    const state = await request(app)
-      .get('/api/attendance/state')
-      .set('Authorization', 'Bearer employee')
-      .query({ employeeId: 'employee-17' });
-    expect(state.body.requiresReview).toBe(true);
     const voidRequest = await request(app)
       .post('/api/attendance/corrections')
       .set('Authorization', 'Bearer employee')
@@ -258,7 +219,7 @@ describe('attendance HTTP API', () => {
     ).toBe('OUT');
   });
 
-  it('enforces correction requester and reviewer separation', async () => {
+  it('TC25 enforces correction requester and reviewer separation', async () => {
     const { app } = setup();
     const own = await request(app)
       .post('/api/attendance/corrections')
@@ -286,7 +247,7 @@ describe('attendance HTTP API', () => {
     expect(unauthorized.status).toBe(403);
   });
 
-  it('restricts month finalization, exports, and audit polling to service roles', async () => {
+  it('TC26 restricts month finalization, exports, and audit polling to service roles', async () => {
     const { app } = setup();
     const finalize = (role: string) =>
       request(app)
@@ -327,11 +288,267 @@ describe('attendance HTTP API', () => {
     ).toBe(200);
   });
 
-  it('reports storage failure without claiming acceptance', async () => {
+  it('TC01 accepts a valid ENTRY event', async () => {
+    const { app } = setup();
+    const response = await sendEvent(app);
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      status: 'created',
+      record: { direction: 'ENTRY' },
+    });
+  });
+
+  it('TC02 accepts a valid EXIT event', async () => {
+    const { app } = setup();
+    const response = await sendEvent(app, { ...event, direction: 'EXIT' });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      status: 'created',
+      record: { direction: 'EXIT' },
+    });
+  });
+
+  it('TC03 returns the original record for an identical retry', async () => {
+    const { app, attendance } = setup();
+    const first = await sendEvent(app);
+    const retry = await sendEvent(app);
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({
+      status: 'duplicate',
+      record: { id: first.body.record.id },
+    });
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(1);
+  });
+
+  it('TC04 rejects changed content with an existing event ID', async () => {
+    const { app, attendance } = setup();
+    await sendEvent(app);
+    const conflict = await sendEvent(app, { ...event, direction: 'EXIT' });
+    expect(conflict.status).toBe(409);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(1);
+    expect((await attendance.listAll(event.employeeId))[0]?.direction).toBe(
+      'ENTRY',
+    );
+  });
+
+  it('TC06 rejects missing and invalid bearer tokens', async () => {
+    const { app, attendance } = setup();
+    expect(
+      (await request(app).post('/api/attendance/events').send(event)).status,
+    ).toBe(401);
+    expect((await sendEvent(app, event, 'invalid-token')).status).toBe(401);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+  });
+
+  it('TC07 rejects a token without the GATEWAY role', async () => {
+    const { app, attendance } = setup();
+    expect((await sendEvent(app, event, 'employee')).status).toBe(403);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+  });
+
+  it('TC08 rejects a factory outside the gateway scope', async () => {
+    const { app, attendance } = setup();
+    expect(
+      (await sendEvent(app, { ...event, factory: 'LONG_AN' })).status,
+    ).toBe(403);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+  });
+
+  it('TC09 rejects every missing required field', async () => {
+    const { app, attendance } = setup();
+    for (const field of Object.keys(event)) {
+      const payload = { ...event } as Record<string, unknown>;
+      delete payload[field];
+      expect(
+        (await sendEvent(app, payload as typeof event)).status,
+        field,
+      ).toBe(400);
+    }
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+  });
+
+  it('TC10 rejects unsupported factory and direction values', async () => {
+    const { app } = setup();
+    expect(
+      (await sendEvent(app, { ...event, factory: 'UNKNOWN' })).status,
+    ).toBe(400);
+    expect(
+      (await sendEvent(app, { ...event, direction: 'ARRIVE' })).status,
+    ).toBe(400);
+  });
+
+  it('TC11 rejects blank and overlong IDs', async () => {
+    const { app } = setup();
+    for (const id of ['', '   ', 'x'.repeat(129)]) {
+      expect((await sendEvent(app, { ...event, eventId: id })).status).toBe(
+        400,
+      );
+      expect(
+        (await sendEvent(app, { ...event, passageEvidenceId: id })).status,
+      ).toBe(400);
+    }
+  });
+
+  it('TC12 rejects malformed timestamps and timestamps without an offset', async () => {
+    const { app } = setup();
+    for (const occurredAt of ['yesterday', '2026-11-09T07:00:00']) {
+      expect((await sendEvent(app, { ...event, occurredAt })).status).toBe(400);
+    }
+  });
+
+  it('TC13 rejects an event more than two minutes in the future', async () => {
+    const { app, attendance } = setup();
+    const response = await sendEvent(app, {
+      ...event,
+      occurredAt: new Date(Date.now() + 3 * 60_000).toISOString(),
+    });
+    expect(response.status).toBe(400);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+  });
+
+  it('TC14 accepts a delayed but otherwise valid event', async () => {
+    const { app } = setup();
+    expect((await sendEvent(app)).status).toBe(201);
+  });
+
+  it('TC15 rejects extra fields and invalid JSON', async () => {
+    const { app } = setup();
+    expect(
+      (await sendEvent(app, { ...event, unexpected: true } as typeof event))
+        .status,
+    ).toBe(400);
+    const malformed = await request(app)
+      .post('/api/attendance/events')
+      .set('Authorization', 'Bearer gateway')
+      .set('Content-Type', 'application/json')
+      .send('{broken');
+    expect(malformed.status).toBe(400);
+  });
+
+  it('TC16 reports a storage failure without claiming acceptance', async () => {
     const { app, attendance } = setup();
     attendance.fail = true;
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect((await sendEvent(app)).status).toBe(503);
-    error.mockRestore();
+    try {
+      expect((await sendEvent(app)).status).toBe(503);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('TC17 accepts a retry after storage recovers', async () => {
+    const { app, attendance } = setup();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      attendance.fail = true;
+      expect((await sendEvent(app)).status).toBe(503);
+      attendance.fail = false;
+      expect(await attendance.listAll(event.employeeId)).toHaveLength(0);
+      expect((await sendEvent(app)).status).toBe(201);
+      expect(await attendance.listAll(event.employeeId)).toHaveLength(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('TC18 recognizes a retry after a successful commit and lost response', async () => {
+    const { app, attendance } = setup();
+    const committed = await sendEvent(app);
+    const retry = await sendEvent(app);
+    expect(committed.status).toBe(201);
+    expect(retry.status).toBe(200);
+    expect(retry.body.status).toBe('duplicate');
+    expect(retry.body.record.id).toBe(committed.body.record.id);
+    expect(await attendance.listAll(event.employeeId)).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      tc: 'TC45',
+      token: 'gatewayLa',
+      factory: 'LONG_AN',
+      direction: 'EXIT',
+      expected: 201,
+    },
+    {
+      tc: 'TC46',
+      token: 'employee',
+      factory: 'BINH_DUONG',
+      direction: 'EXIT',
+      expected: 403,
+    },
+    {
+      tc: 'TC47',
+      token: 'employee',
+      factory: 'LONG_AN',
+      direction: 'ENTRY',
+      expected: 403,
+    },
+  ])(
+    '$tc pairwise role × factory × direction',
+    async ({ token, factory, direction, expected }) => {
+      const { app } = setup();
+      const response = await sendEvent(
+        app,
+        { ...event, factory, direction },
+        token,
+      );
+      expect(response.status).toBe(expected);
+    },
+  );
+
+  it('TC48 use case accepts entry and exit then returns ordered history and OUT state', async () => {
+    const { app } = setup();
+    expect((await sendEvent(app)).status).toBe(201);
+    expect(
+      (
+        await sendEvent(app, {
+          ...event,
+          eventId: 'edge-002',
+          passageEvidenceId: 'passage-002',
+          direction: 'EXIT',
+          occurredAt: '2026-11-09T17:00:00+07:00',
+        })
+      ).status,
+    ).toBe(201);
+    const history = await getHistory(app);
+    expect(
+      history.body.records.map((row: { direction: string }) => row.direction),
+    ).toEqual(['EXIT', 'ENTRY']);
+    const state = await request(app)
+      .get('/api/attendance/state')
+      .set('Authorization', 'Bearer employee')
+      .query({ employeeId: 'employee-17' });
+    expect(state.body).toMatchObject({ state: 'OUT', requiresReview: false });
+  });
+
+  it('TC49 state transition starts at UNKNOWN without an event', async () => {
+    const { app } = setup();
+    const state = await request(app)
+      .get('/api/attendance/state')
+      .set('Authorization', 'Bearer employee')
+      .query({ employeeId: 'employee-17' });
+    expect(state.body).toMatchObject({
+      state: 'UNKNOWN',
+      asOf: null,
+      requiresReview: false,
+    });
+  });
+
+  it('TC50 state transition flags consecutive ENTRY events for review', async () => {
+    const { app } = setup();
+    await sendEvent(app);
+    await sendEvent(app, {
+      ...event,
+      eventId: 'edge-002',
+      passageEvidenceId: 'passage-002',
+      occurredAt: '2026-11-09T08:00:00+07:00',
+    });
+    const state = await request(app)
+      .get('/api/attendance/state')
+      .set('Authorization', 'Bearer employee')
+      .query({ employeeId: 'employee-17' });
+    expect(state.body).toMatchObject({ state: 'IN', requiresReview: true });
   });
 });

@@ -40,7 +40,7 @@ function adapter(
 }
 
 describe('Prisma attendance adapter', () => {
-  it('inserts a new event directly', async () => {
+  it('TC28 inserts a new event directly', async () => {
     const create = vi.fn().mockResolvedValue(record);
     const repository = adapter(create);
     await expect(
@@ -52,7 +52,7 @@ describe('Prisma attendance adapter', () => {
     expect(create).toHaveBeenCalledWith({ data: event });
   });
 
-  it('retrieves the original record after a unique event ID race', async () => {
+  it('TC29 retrieves the original record after a unique event ID race', async () => {
     const conflict = new Prisma.PrismaClientKnownRequestError(
       'Unique constraint',
       {
@@ -73,7 +73,24 @@ describe('Prisma attendance adapter', () => {
     });
   });
 
-  it('propagates database failures and queries history with stable ordering', async () => {
+  it('TC05 rejects a reused passage evidence ID with a different event ID', async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError(
+      'Unique constraint',
+      { code: 'P2002', clientVersion: '6.19.3' },
+    );
+    const repository = adapter(
+      vi.fn().mockRejectedValue(conflict),
+      vi.fn().mockResolvedValue(null),
+    );
+    await expect(
+      repository.insertOrGet(event, 'factory-gateway'),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'Passage evidence already recorded',
+    });
+  });
+
+  it('TC30 propagates database failures and queries history with stable ordering', async () => {
     const failure = new Error('connection lost');
     const findMany = vi.fn().mockResolvedValue([record]);
     const repository = adapter(

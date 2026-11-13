@@ -26,7 +26,7 @@ const input = {
 };
 
 describe('correction rule extension', () => {
-  it('adds a ticket requirement without changing the request use case', async () => {
+  it('TC52 adds a ticket requirement without changing the request use case', async () => {
     const periods = new MemoryPeriods();
     const records = new MemoryAttendance(periods);
     const writer = new MemoryCorrections(records, periods);

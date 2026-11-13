@@ -16,7 +16,7 @@ const event = {
 };
 
 describe('AttendanceEventWriter contract', () => {
-  it('is respected by the in-memory adapter', async () => {
+  it('TC51 is respected by the in-memory adapter', async () => {
     const periods = new MemoryPeriods();
     const writer = new MemoryAttendance(periods);
     const record = await verifyAttendanceWriterContract(writer, event);
