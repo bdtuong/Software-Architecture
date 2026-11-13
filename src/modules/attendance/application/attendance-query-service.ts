@@ -1,18 +1,16 @@
 import type { Factory } from '../domain/attendance';
-import type { Principal } from '../../../config/auth';
-import type { AttendanceRepository } from './attendance-repository';
-import type { CorrectionRepository } from './correction-repository';
+import type { Principal } from '../domain/identity';
+import type { AttendanceRecordReader } from './attendance-repository';
+import type { ApprovedCorrectionReader } from './correction-repository';
 import { AttendanceRuleError } from './errors';
-import {
-  applyCorrections,
-  canReadEmployee,
-  canReadFactory,
-} from './correction-service';
+import type { EffectiveFactoryReader } from './effective-factory-reader';
+import { applyCorrections } from '../domain/correction-effect';
+import { canReadEmployee, canReadFactory } from '../domain/access-policy';
 
-export class AttendanceQueryService {
+export class AttendanceQueryService implements EffectiveFactoryReader {
   constructor(
-    private readonly attendance: AttendanceRepository,
-    private readonly corrections: CorrectionRepository,
+    private readonly attendance: AttendanceRecordReader,
+    private readonly corrections: ApprovedCorrectionReader,
   ) {}
 
   async effective(

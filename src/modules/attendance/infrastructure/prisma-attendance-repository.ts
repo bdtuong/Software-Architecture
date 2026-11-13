@@ -1,13 +1,22 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AttendanceRuleError } from '../application/errors';
 import { vietnamMonth } from '../domain/period';
-import type { AttendanceRepository } from '../application/attendance-repository';
+import type {
+  AttendanceEventWriter,
+  AttendanceRecordReader,
+  AttendanceRecordLookup,
+} from '../application/attendance-repository';
 import type {
   AttendanceRecord,
   QualifiedAttendanceEvent,
 } from '../domain/attendance';
 
-export class PrismaAttendanceRepository implements AttendanceRepository {
+export class PrismaAttendanceRepository
+  implements
+    AttendanceEventWriter,
+    AttendanceRecordReader,
+    AttendanceRecordLookup
+{
   constructor(private readonly prisma: PrismaClient) {}
 
   async insertOrGet(event: QualifiedAttendanceEvent, actorId: string) {
@@ -52,6 +61,10 @@ export class PrismaAttendanceRepository implements AttendanceRepository {
       }
       throw error;
     }
+  }
+
+  findRecord(id: string) {
+    return this.prisma.attendanceRecord.findUnique({ where: { id } });
   }
 
   async listForFactory(

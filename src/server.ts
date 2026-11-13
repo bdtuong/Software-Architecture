@@ -6,7 +6,9 @@ import { loadEnv } from './config/env';
 import { AttendanceService } from './modules/attendance/application/attendance-service';
 import { AttendanceQueryService } from './modules/attendance/application/attendance-query-service';
 import { PeriodService } from './modules/attendance/application/period-service';
-import { CorrectionService } from './modules/attendance/application/correction-service';
+import { RequestCorrection } from './modules/attendance/application/request-correction';
+import { ReviewCorrection } from './modules/attendance/application/review-correction';
+import { ListCorrections } from './modules/attendance/application/list-corrections';
 import { PrismaAuditOutboxRepository } from './modules/attendance/infrastructure/prisma-audit-outbox-repository';
 import { PrismaAttendanceRepository } from './modules/attendance/infrastructure/prisma-attendance-repository';
 import { PrismaPeriodRepository } from './modules/attendance/infrastructure/prisma-period-repository';
@@ -25,7 +27,12 @@ const server = createApp({
   attendance: new AttendanceService(attendanceRepository),
   query,
   periods: new PeriodService(new PrismaPeriodRepository(prisma), query),
-  corrections: new CorrectionService(correctionRepository),
+  requestCorrection: new RequestCorrection(
+    attendanceRepository,
+    correctionRepository,
+  ),
+  reviewCorrection: new ReviewCorrection(correctionRepository),
+  listCorrections: new ListCorrections(correctionRepository),
   verify: createTokenVerifier(env.JWT_SECRET),
   auditOutbox: new PrismaAuditOutboxRepository(prisma),
 }).listen(env.PORT, () =>

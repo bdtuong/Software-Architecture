@@ -1,15 +1,22 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import type { CorrectionRepository } from '../application/correction-repository';
+import type {
+  CorrectionRequestWriter,
+  CorrectionReviewer,
+  CorrectionRequestReader,
+  ApprovedCorrectionReader,
+} from '../application/correction-repository';
 import { AttendanceRuleError } from '../application/errors';
 import { vietnamMonth } from '../domain/period';
 import type { NewCorrection } from '../domain/correction';
 
-export class PrismaCorrectionRepository implements CorrectionRepository {
+export class PrismaCorrectionRepository
+  implements
+    CorrectionRequestWriter,
+    CorrectionReviewer,
+    CorrectionRequestReader,
+    ApprovedCorrectionReader
+{
   constructor(private readonly prisma: PrismaClient) {}
-
-  findRecord(id: string) {
-    return this.prisma.attendanceRecord.findUnique({ where: { id } });
-  }
 
   async create(input: NewCorrection) {
     return this.prisma.$transaction(async (tx) => {

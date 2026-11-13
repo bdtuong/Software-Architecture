@@ -3,7 +3,9 @@ import { z } from 'zod';
 import type { TokenVerifier } from '../../../config/auth';
 import { AttendanceService } from '../application/attendance-service';
 import { AttendanceQueryService } from '../application/attendance-query-service';
-import { CorrectionService } from '../application/correction-service';
+import { RequestCorrection } from '../application/request-correction';
+import { ReviewCorrection } from '../application/review-correction';
+import { ListCorrections } from '../application/list-corrections';
 import type { AttendanceRecord } from '../domain/attendance';
 import { PeriodService } from '../application/period-service';
 import { principalOf, requirePrincipal } from './auth-middleware';
@@ -64,7 +66,9 @@ function validationError(
 export function attendanceRoutes(
   attendance: AttendanceService,
   query: AttendanceQueryService,
-  corrections: CorrectionService,
+  requestCorrection: RequestCorrection,
+  reviewCorrection: ReviewCorrection,
+  listCorrections: ListCorrections,
   verify: TokenVerifier,
   periods: PeriodService,
 ) {
@@ -158,7 +162,7 @@ export function attendanceRoutes(
       return;
     }
     try {
-      const correction = await corrections.request(
+      const correction = await requestCorrection.execute(
         {
           ...parsed.data,
           occurredAt: parsed.data.occurredAt
@@ -185,7 +189,7 @@ export function attendanceRoutes(
     }
     try {
       response.json({
-        corrections: await corrections.list(
+        corrections: await listCorrections.execute(
           parsed.data.employeeId,
           principalOf(request),
         ),
@@ -207,7 +211,7 @@ export function attendanceRoutes(
     }
     try {
       response.json(
-        await corrections.review(
+        await reviewCorrection.execute(
           request.params.id!,
           principalOf(request),
           parsed.data.approve,

@@ -1,10 +1,10 @@
 import { AttendanceRuleError, EventIdConflictError } from './errors';
 import { sameEvent } from '../domain/attendance';
 import type { QualifiedAttendanceEvent } from '../domain/attendance';
-import type { AttendanceRepository } from './attendance-repository';
+import type { AttendanceEventWriter } from './attendance-repository';
 
 export class AttendanceService {
-  constructor(private readonly repository: AttendanceRepository) {}
+  constructor(private readonly repository: AttendanceEventWriter) {}
 
   async accept(event: QualifiedAttendanceEvent, actorId: string) {
     if (event.occurredAt.getTime() > Date.now() + 2 * 60_000) {
@@ -13,9 +13,5 @@ export class AttendanceService {
     const result = await this.repository.insertOrGet(event, actorId);
     if (!sameEvent(result.record, event)) throw new EventIdConflictError();
     return result;
-  }
-
-  allForEmployee(employeeId: string) {
-    return this.repository.listAll(employeeId);
   }
 }

@@ -1,14 +1,14 @@
-import type { Principal } from '../../../config/auth';
+import type { Principal } from '../domain/identity';
 import type { Factory } from '../domain/attendance';
 import { monthBounds, vietnamMonth } from '../domain/period';
 import { AttendanceRuleError } from './errors';
 import type { PeriodRepository } from './period-repository';
-import { AttendanceQueryService } from './attendance-query-service';
+import type { EffectiveFactoryReader } from './effective-factory-reader';
 
 export class PeriodService {
   constructor(
     private readonly periods: PeriodRepository,
-    private readonly query: AttendanceQueryService,
+    private readonly query: EffectiveFactoryReader,
   ) {}
 
   async finalize(

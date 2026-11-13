@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
-import type { Principal, TokenVerifier } from '../../../config/auth';
+import type { TokenVerifier } from '../../../config/auth';
+import type { Principal } from '../domain/identity';
 
 export type AuthenticatedRequest = Express.Request & { principal: Principal };
 

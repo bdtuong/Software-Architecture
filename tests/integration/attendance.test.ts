@@ -1,136 +1,18 @@
-import { randomUUID } from 'node:crypto';
+import {
+  MemoryAttendance,
+  MemoryCorrections,
+  MemoryPeriods,
+} from '../support/memory-repositories';
 import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app';
-import type { Principal } from '../../src/config/auth';
-import type { AttendanceRepository } from '../../src/modules/attendance/application/attendance-repository';
+import type { Principal } from '../../src/modules/attendance/domain/identity';
 import { AttendanceService } from '../../src/modules/attendance/application/attendance-service';
 import { PeriodService } from '../../src/modules/attendance/application/period-service';
-import type { PeriodRepository } from '../../src/modules/attendance/application/period-repository';
-import type { AttendancePeriod } from '../../src/modules/attendance/domain/period';
 import { AttendanceQueryService } from '../../src/modules/attendance/application/attendance-query-service';
-import type { CorrectionRepository } from '../../src/modules/attendance/application/correction-repository';
-import { CorrectionService } from '../../src/modules/attendance/application/correction-service';
-import type {
-  AttendanceRecord,
-  QualifiedAttendanceEvent,
-} from '../../src/modules/attendance/domain/attendance';
-import type {
-  AttendanceCorrection,
-  NewCorrection,
-} from '../../src/modules/attendance/domain/correction';
-
-class MemoryAttendance implements AttendanceRepository {
-  private records = new Map<string, AttendanceRecord>();
-  fail = false;
-  async insertOrGet(event: QualifiedAttendanceEvent, _actorId: string) {
-    void _actorId;
-    if (this.fail) throw new Error('database offline');
-    const existing = this.records.get(event.eventId);
-    if (existing) return { record: existing, created: false };
-    const record = { ...event, id: randomUUID(), recordedAt: new Date() };
-    this.records.set(event.eventId, record);
-    return { record, created: true };
-  }
-  async listForFactory(factory: QualifiedAttendanceEvent['factory']) {
-    return [...this.records.values()].filter(
-      (record) => record.factory === factory,
-    );
-  }
-  async listAll(employeeId: string) {
-    if (this.fail) throw new Error('database offline');
-    return [...this.records.values()].filter(
-      (record) => record.employeeId === employeeId,
-    );
-  }
-  async findRecord(id: string) {
-    return (
-      [...this.records.values()].find((record) => record.id === id) ?? null
-    );
-  }
-}
-
-class MemoryCorrections implements CorrectionRepository {
-  private rows = new Map<string, AttendanceCorrection>();
-  constructor(private readonly attendance: MemoryAttendance) {}
-  findRecord(id: string) {
-    return this.attendance.findRecord(id);
-  }
-  async create(input: NewCorrection) {
-    const row: AttendanceCorrection = {
-      ...input,
-      id: randomUUID(),
-      status: 'PENDING',
-      targetRecordId: input.targetRecordId ?? null,
-      direction: input.direction ?? null,
-      occurredAt: input.occurredAt ?? null,
-      requestedAt: new Date(),
-      reviewedBy: null,
-      reviewedAt: null,
-      reviewReason: null,
-    };
-    this.rows.set(row.id, row);
-    return row;
-  }
-  async find(id: string) {
-    return this.rows.get(id) ?? null;
-  }
-  async list(employeeId: string) {
-    return [...this.rows.values()].filter(
-      (row) => row.employeeId === employeeId,
-    );
-  }
-  async approvedForFactory(factory: NewCorrection['factory']) {
-    return [...this.rows.values()].filter(
-      (row) => row.factory === factory && row.status === 'APPROVED',
-    );
-  }
-  async approved(employeeId: string) {
-    return (await this.list(employeeId)).filter(
-      (row) => row.status === 'APPROVED',
-    );
-  }
-  async review(
-    id: string,
-    reviewerId: string,
-    approve: boolean,
-    reason: string,
-  ) {
-    const row = this.rows.get(id);
-    if (!row || row.status !== 'PENDING') return null;
-    row.status = approve ? 'APPROVED' : 'REJECTED';
-    row.reviewedBy = reviewerId;
-    row.reviewedAt = new Date();
-    row.reviewReason = reason;
-    return row;
-  }
-}
-
-class MemoryPeriods implements PeriodRepository {
-  private rows = new Map<string, AttendancePeriod>();
-  async get(factory: QualifiedAttendanceEvent['factory'], month: string) {
-    return this.rows.get(`${factory}:${month}`) ?? null;
-  }
-  async finalize(
-    factory: QualifiedAttendanceEvent['factory'],
-    month: string,
-    actorId: string,
-  ) {
-    const prior = await this.get(factory, month);
-    if (prior?.status === 'FINALIZED') return prior;
-    const row: AttendancePeriod = {
-      id: prior?.id ?? randomUUID(),
-      factory,
-      month,
-      status: 'FINALIZED',
-      revision: (prior?.revision ?? 0) + 1,
-      finalizedAt: new Date(),
-      finalizedBy: actorId,
-    };
-    this.rows.set(`${factory}:${month}`, row);
-    return row;
-  }
-}
+import { RequestCorrection } from '../../src/modules/attendance/application/request-correction';
+import { ReviewCorrection } from '../../src/modules/attendance/application/review-correction';
+import { ListCorrections } from '../../src/modules/attendance/application/list-corrections';
 
 const principals: Record<string, Principal> = {
   gateway: {
@@ -207,14 +89,17 @@ const getHistory = (app: ReturnType<typeof createApp>, token = 'employee') =>
     .set('Authorization', `Bearer ${token}`)
     .query({ employeeId: 'employee-17' });
 const setup = () => {
-  const attendance = new MemoryAttendance();
-  const corrections = new MemoryCorrections(attendance);
+  const periodRepository = new MemoryPeriods();
+  const attendance = new MemoryAttendance(periodRepository);
+  const corrections = new MemoryCorrections(attendance, periodRepository);
   const query = new AttendanceQueryService(attendance, corrections);
   const app = createApp({
     attendance: new AttendanceService(attendance),
     query,
-    periods: new PeriodService(new MemoryPeriods(), query),
-    corrections: new CorrectionService(corrections),
+    periods: new PeriodService(periodRepository, query),
+    requestCorrection: new RequestCorrection(attendance, corrections),
+    reviewCorrection: new ReviewCorrection(corrections),
+    listCorrections: new ListCorrections(corrections),
     auditOutbox: { pending: async () => [], acknowledge: async () => false },
     verify: async (token) => {
       if (!principals[token]) throw new Error('bad token');

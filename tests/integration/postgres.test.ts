@@ -1,9 +1,11 @@
+import { verifyAttendanceWriterContract } from '../support/attendance-writer-contract';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AttendanceService } from '../../src/modules/attendance/application/attendance-service';
 import { AttendanceQueryService } from '../../src/modules/attendance/application/attendance-query-service';
-import { CorrectionService } from '../../src/modules/attendance/application/correction-service';
+import { RequestCorrection } from '../../src/modules/attendance/application/request-correction';
+import { ReviewCorrection } from '../../src/modules/attendance/application/review-correction';
 import { PeriodService } from '../../src/modules/attendance/application/period-service';
 import { PrismaAttendanceRepository } from '../../src/modules/attendance/infrastructure/prisma-attendance-repository';
 import { PrismaCorrectionRepository } from '../../src/modules/attendance/infrastructure/prisma-correction-repository';
@@ -31,7 +33,11 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
     const audit = new PrismaAuditOutboxRepository(db);
     const attendance = new AttendanceService(attendanceRepo);
     const query = new AttendanceQueryService(attendanceRepo, correctionRepo);
-    const corrections = new CorrectionService(correctionRepo);
+    const requestCorrection = new RequestCorrection(
+      attendanceRepo,
+      correctionRepo,
+    );
+    const reviewCorrection = new ReviewCorrection(correctionRepo);
     const periods = new PeriodService(periodRepo, query);
     const suffix = randomUUID();
     const employeeId = `test-${suffix}`;
@@ -65,9 +71,14 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
     };
     const aggregateIds: string[] = [];
     try {
+      const contracted = await verifyAttendanceWriterContract(
+        attendanceRepo,
+        event,
+      );
       const first = await attendance.accept(event, gateway);
+      expect(first.record.id).toBe(contracted.id);
       aggregateIds.push(first.record.id);
-      expect(first.created).toBe(true);
+      expect(first.created).toBe(false);
       expect((await attendance.accept(event, gateway)).created).toBe(false);
       expect(
         await db.attendanceRecord.count({ where: { eventId: event.eventId } }),
@@ -89,7 +100,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect(await audit.acknowledge(auditMessage!.id)).toBe(true);
       expect(await audit.acknowledge(auditMessage!.id)).toBe(true);
 
-      const request = await corrections.request(
+      const request = await requestCorrection.execute(
         {
           kind: 'REPLACE',
           employeeId,
@@ -106,7 +117,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect((await query.state(employeeId, employee)).state).toBe('IN');
       expect(
         (
-          await corrections.review(
+          await reviewCorrection.execute(
             request.id,
             hr,
             true,
@@ -123,7 +134,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
         ).direction,
       ).toBe('ENTRY');
 
-      const secondRequest = await corrections.request(
+      const secondRequest = await requestCorrection.execute(
         {
           kind: 'VOID',
           employeeId,
@@ -136,7 +147,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       );
       aggregateIds.push(secondRequest.id);
       await expect(
-        corrections.review(
+        reviewCorrection.execute(
           secondRequest.id,
           hr,
           true,
@@ -146,7 +157,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       await expect(
         periods.finalize('BINH_DUONG', '2026-10', hr),
       ).rejects.toMatchObject({ status: 409 });
-      await corrections.review(
+      await reviewCorrection.execute(
         secondRequest.id,
         hr,
         false,
@@ -184,7 +195,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect(
         (await periods.finalize('BINH_DUONG', '2026-10', hr)).revision,
       ).toBe(2);
-      const lateCorrection = await corrections.request(
+      const lateCorrection = await requestCorrection.execute(
         {
           kind: 'ADD',
           employeeId,
@@ -200,7 +211,7 @@ describe.skipIf(!enabled)('PostgreSQL attendance transaction', () => {
       expect((await periodRepo.get('BINH_DUONG', '2026-10'))?.status).toBe(
         'REOPEN_REQUIRED',
       );
-      await corrections.review(
+      await reviewCorrection.execute(
         lateCorrection.id,
         hr,
         false,

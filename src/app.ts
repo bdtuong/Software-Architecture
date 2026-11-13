@@ -7,7 +7,9 @@ import {
   EventIdConflictError,
 } from './modules/attendance/application/errors';
 import { AttendanceQueryService } from './modules/attendance/application/attendance-query-service';
-import { CorrectionService } from './modules/attendance/application/correction-service';
+import { RequestCorrection } from './modules/attendance/application/request-correction';
+import { ReviewCorrection } from './modules/attendance/application/review-correction';
+import { ListCorrections } from './modules/attendance/application/list-corrections';
 import type { AuditOutboxRepository } from './modules/attendance/application/audit-outbox-repository';
 import { auditOutboxRoutes } from './modules/attendance/presentation/audit-outbox-routes';
 import { PeriodService } from './modules/attendance/application/period-service';
@@ -17,7 +19,9 @@ import { openApiDocument } from './openapi';
 export interface AttendanceDependencies {
   attendance: AttendanceService;
   query: AttendanceQueryService;
-  corrections: CorrectionService;
+  requestCorrection: RequestCorrection;
+  reviewCorrection: ReviewCorrection;
+  listCorrections: ListCorrections;
   periods: PeriodService;
   verify: TokenVerifier;
   auditOutbox?: AuditOutboxRepository;
@@ -35,7 +39,9 @@ export function createApp(dependencies?: AttendanceDependencies) {
       attendanceRoutes(
         dependencies.attendance,
         dependencies.query,
-        dependencies.corrections,
+        dependencies.requestCorrection,
+        dependencies.reviewCorrection,
+        dependencies.listCorrections,
         dependencies.verify,
         dependencies.periods,
       ),
